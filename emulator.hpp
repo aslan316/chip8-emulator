@@ -50,7 +50,7 @@ public:
 
 private:
   BYTE m_gameMemory[0xFFF];  // 0xFFF bytes of memory
-  BYTE m_registers[16];      // 16 registers, 1 byte each
+  BYTE m_register[16];      // 16 registers, 1 byte each
   WORD m_addressI;           // the 16-bit address register I
   WORD m_programCounter;     // the 16-bit program counter
   std::vector<WORD> m_stack; // the 16-bit stack
