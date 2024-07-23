@@ -8,7 +8,7 @@ typedef std::uint16_t WORD;
 void Emulator::CPUReset() {
   m_addressI = 0;
   m_programCounter = 0x200;
-  memset(m_registers, 0, sizeof(m_registers));
+  memset(m_register, 0, sizeof(m_register));
 
   // load in the game
   FILE *in;
@@ -155,7 +155,10 @@ void Emulator::opcode00EE(WORD opcode);
 void Emulator::opcode1NNN(WORD opcode);
 
 // calls a subroutine at NNN
-void Emulator::opcode2NNN(WORD opcode);
+void Emulator::opcode2NNN(WORD opcode) {
+  m_stack.push_back(m_programCounter);
+  m_programCounter = opcode & 0x0FFF;
+}
 
 // Skips the next instruction if VX equals NN
 // (usually the next instruction is a jump to skip a code block).
@@ -167,7 +170,15 @@ void Emulator::opcode4XNN(WORD opcode);
 
 // Skips the next instruction if VX equals VY
 // (usually the next instruction is a jump to skip a code block)
-void Emulator::opcode5XY0(WORD opcode);
+void Emulator::opcode5XY0(WORD opcode) {
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  int regy = opcode & 0x00F0;
+  regy >>= 4;
+  if (m_register[regx] == m_register[regy]) {
+    m_programCounter += 2;
+  }
+}
 
 // Vx == NN
 void Emulator::opcode6XNN(WORD opcode);
@@ -191,7 +202,19 @@ void Emulator::opcode8XY3(WORD opcode);
 void Emulator::opcode8XY4(WORD opcode);
 
 // Vx -= Vy (sets overflow)
-void Emulator::opcode8XY5(WORD opcode);
+void Emulator::opcode8XY5(WORD opcode) {
+  m_register[0xF] = 1; // signifies wrapping did not occur
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  int regy = opcode & 0x00F0;
+  regy >>= 4;
+  int xval = m_register[regx];
+  int yval = m_register[regy];
+  if (yval > xval) {
+    m_register[0xF] = 0; // signifies wrapping did occur
+  }
+  m_register[regx] = xval - yval;
+}
 
 // Vx >>= 1 (least significant bit to overflow)
 void Emulator::opcode8XY6(WORD opcode);
@@ -222,7 +245,35 @@ void Emulator::opcodeCXNN(WORD opcode);
 // instruction. As described above, VF is set to 1 if any screen pixels are
 // flipped from set to unset when the sprite is drawn, and to 0 if that does not
 // happen
-void Emulator::opcodeDXYN(WORD opcode);
+void Emulator::opcodeDXYN(WORD opcode) {
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  int regy = opcode & 0x00F0;
+  regy >>= 4;
+
+  int height = opcode & 0x000F;
+  int coordx = m_register[regx];
+  int coordy = m_register[regy];
+
+  m_register[0xF] = 0;
+
+  for (int yline{0}; yline < height; yline++) {
+    BYTE data = m_gameMemory[m_addressI + yline];
+    int xpixelinv = 7;
+    int xpixel = 0;
+    for (; xpixel < 8; xpixel++, xpixelinv--) {
+      int mask = 1 << xpixelinv;
+      if (data & mask) {
+        int x = coordx + xpixel;
+        int y = coordy + yline;
+        if (m_screenData[x][y] == 1) {
+          m_register[0xF] = 1; // collision
+        }
+        m_ScreenData[x][y] ^= 1;
+      }
+    }
+  }
+}
 
 // Skips the next instruction if the key stored in VX is pressed (usually the
 // next instruction is a jump to skip a code block)
@@ -255,14 +306,41 @@ void Emulator::opcodeFX29(WORD opcode);
 // Stores the binary-coded decimal representation of VX, with the hundreds digit
 // in memory at location in I, the tens digit at location I+1, and the ones
 // digit at location I+2
-void Emulator::opcodeFX33(WORD opcode);
+void Emulator::opcodeFX33(WORD opcode) {
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
 
-// Stores the binary-coded decimal representation of VX, with the hundreds digit
-// in memory at location in I, the tens digit at location I+1, and the ones
-// digit at location I+2
-void Emulator::opcodeFX55(WORD opcode);
+  int value = m_register[regx];
+
+  int hundreds = value / 100;
+  int tens = (value / 10) % 10;
+  int units = value % 10;
+
+  m_gameMemory[m_addressI] = hundreds;
+  m_gameMemory[m_addressI + 1] = tens;
+  m_gameMemory[m_addressI + 2] = units;
+}
+
+// Stores from V0 to VX (including VX) in memory, starting at address I. The
+// offset from I is increased by 1 for each value written, but I itself is left
+// unmodified
+void Emulator::opcodeFX55(WORD opcode) {
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  for (int i{0}; i <= regx; i++) {
+    m_gameMemory[m_addressI + i] = m_register[i];
+  }
+  m_addressI = m_addressI + regx + 1;
+}
 
 // Fills from V0 to VX (including VX) with values from memory, starting at
 // address I. The offset from I is increased by 1 for each value read, but I
 // itself is left unmodified
-void Emulator::opcodeFX65(WORD opcode);
+void Emulator::opcodeFX65(WORD opcode) {
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  for (int i{0}; i <= regx; i++) {
+    m_register[m_addressI + i] = m_gameMemory[i];
+  }
+  m_addressI = m_addressI + regx + 1;
+}
