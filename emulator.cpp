@@ -1,4 +1,5 @@
 #include "emulator.hpp"
+#include "../useful-programs/Random.h"
 #include <cstdio>
 #include <cstring>
 
@@ -146,13 +147,20 @@ void Emulator::decodeOpcode() {
 }
 
 // clears the screen
-void Emulator::opcode00E0(WORD opcode);
+void Emulator::opcode00E0(WORD opcode) {
+
+}
 
 // returns from a subroutine
-void Emulator::opcode00EE(WORD opcode);
+void Emulator::opcode00EE(WORD opcode) {
+  m_programCounter = m_stack.back();
+  m_stack.pop_back();
+}
 
 // jumps to address NNN
-void Emulator::opcode1NNN(WORD opcode);
+void Emulator::opcode1NNN(WORD opcode) {
+  m_programCounter = opcode & 0x0FFF;
+}
 
 // calls a subroutine at NNN
 void Emulator::opcode2NNN(WORD opcode) {
@@ -162,11 +170,25 @@ void Emulator::opcode2NNN(WORD opcode) {
 
 // Skips the next instruction if VX equals NN
 // (usually the next instruction is a jump to skip a code block).
-void Emulator::opcode3XNN(WORD opcode);
+void Emulator::opcode3XNN(WORD opcode) {
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  int nn = opcode & 0x00FF;
+  if (m_register[regx] == nn) {
+    m_programCounter += 2;
+  }
+}
 
 // Skips the next instruction if VX does not equal NN
 // (usually the next instruction is a jump to skip a code block)
-void Emulator::opcode4XNN(WORD opcode);
+void Emulator::opcode4XNN(WORD opcode) {
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  int nn = opcode & 0x00FF;
+  if (m_register[regx] != nn) {
+    m_programCounter += 2;
+  }
+}
 
 // Skips the next instruction if VX equals VY
 // (usually the next instruction is a jump to skip a code block)
@@ -181,25 +203,71 @@ void Emulator::opcode5XY0(WORD opcode) {
 }
 
 // Vx == NN
-void Emulator::opcode6XNN(WORD opcode);
+void Emulator::opcode6XNN(WORD opcode) {
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  int nn = opcode & 0x00FF;
+  m_register[regx] = nn;
+}
 
 // Vx += NN
-void Emulator::opcode7XNN(WORD opcode);
+void Emulator::opcode7XNN(WORD opcode) {
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  int nn = opcode & 0x00FF;
+  m_register[regx] += nn;
+}
 
 // Vx = Vy
-void Emulator::opcode8XY0(WORD opcode);
+void Emulator::opcode8XY0(WORD opcode) {
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  int regy = opcode & 0x00F0;
+  regx >>= 4;
+  m_register[regx] = m_register[regy];
+}
 
 // Vx |= Vy
-void Emulator::opcode8XY1(WORD opcode);
+void Emulator::opcode8XY1(WORD opcode) {
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  int regy = opcode & 0x00F0;
+  regx >>= 4;
+  m_register[regx] |= m_register[regy];
+}
 
 // Vx &= Vy
-void Emulator::opcode8XY2(WORD opcode);
+void Emulator::opcode8XY2(WORD opcode) {
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  int regy = opcode & 0x00F0;
+  regx >>= 4;
+  m_register[regx] &= m_register[regy];
+}
 
 // Vx ^= Vy
-void Emulator::opcode8XY3(WORD opcode);
+void Emulator::opcode8XY3(WORD opcode) {
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  int regy = opcode & 0x00F0;
+  regx >>= 4;
+  m_register[regx] ^= m_register[regy];
+}
 
 // Vx += Vy (sets overflow)
-void Emulator::opcode8XY4(WORD opcode);
+void Emulator::opcode8XY4(WORD opcode) {
+  m_register[0xF] = 1; // signifies wrapping did not occur
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  int regy = opcode & 0x00F0;
+  regy >>= 4;
+  int xval = m_register[regx];
+  int yval = m_register[regy];
+  if (xval + yval > 255) {
+    m_register[0xF] = 0; // signifies wrapping did occur
+  }
+  m_register[regx] = xval + yval;
+}
 
 // Vx -= Vy (sets overflow)
 void Emulator::opcode8XY5(WORD opcode) {
@@ -217,27 +285,68 @@ void Emulator::opcode8XY5(WORD opcode) {
 }
 
 // Vx >>= 1 (least significant bit to overflow)
-void Emulator::opcode8XY6(WORD opcode);
+void Emulator::opcode8XY6(WORD opcode) {
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  m_register[0xF] = m_register[regx] & 0x1;
+  m_register[regx] >>= 1;
+}
 
 // Vx = Vy - Vx (sets overflow)
-void Emulator::opcode8XY7(WORD opcode);
+void Emulator::opcode8XY7(WORD opcode) {
+  m_register[0xF] = 1; // signifies wrapping did not occur
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  int regy = opcode & 0x00F0;
+  regy >>= 4;
+  int xval = m_register[regx];
+  int yval = m_register[regy];
+  if (yval < xval) {
+    m_register[0xF] = 0; // signifies wrapping did occur
+  }
+  m_register[regx] = yval - xval;
+}
 
 // Vx <<= 1 (most significant bit to overflow)
-void Emulator::opcode8XYE(WORD opcode);
+void Emulator::opcode8XYE(WORD opcode) {
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  m_register[0xF] = m_register[regx] & 0x80;
+  m_register[regx] <<= 1;
+}
 
 // Skips the next instruction if VX does not equal VY.
 // (Usually the next instruction is a jump to skip a code block)
-void Emulator::opcode9XY0(WORD opcode);
+void Emulator::opcode9XY0(WORD opcode) {
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  int regy = opcode & 0x00F0;
+  regy >>= 4;
+  if (m_register[regx] != m_register[regy]) {
+    m_programCounter += 2;
+  }
+}
 
 // I = NNN
-void Emulator::opcodeANNN(WORD opcode);
+void Emulator::opcodeANNN(WORD opcode) {
+  int nnn = opcode & 0x0FFF;
+  m_addressI = nnn;
+}
 
-// Jumps to the address NN plus V0
-void Emulator::opcodeBNNN(WORD opcode);
+// Jumps to the address NNN plus V0
+void Emulator::opcodeBNNN(WORD opcode) {
+  int nnn = opcode & 0x0FFF;
+  m_programCounter = nnn + m_register[0x0];
+}
 
 // Sets VX to the result of a bitwise and operation on a random number
 // (Typically: 0 to 255) and NN.
-void Emulator::opcodeCXNN(WORD opcode);
+void Emulator::opcodeCXNN(WORD opcode) {
+  int regx = opcode & 0x0F00;
+  regx >>= 8;
+  int nn = opcode & 0x00FF;
+  m_register[regx] = Random::get(0, 255) & nn;
+}
 
 // Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a
 // height of N pixels. Each row of 8 pixels is read as bit-coded starting from
@@ -269,39 +378,39 @@ void Emulator::opcodeDXYN(WORD opcode) {
         if (m_screenData[x][y] == 1) {
           m_register[0xF] = 1; // collision
         }
-        m_ScreenData[x][y] ^= 1;
+        m_screenData[x][y] ^= 1;
       }
     }
   }
 }
 
-// Skips the next instruction if the key stored in VX is pressed (usually the
-// next instruction is a jump to skip a code block)
-void Emulator::opcodeEX9E(WORD opcode);
-
-// Skips the next instruction if the key stored in VX is not pressed (usually
-// the next instruction is a jump to skip a code block)
-void Emulator::opcodeEXA1(WORD opcode);
-
-// Sets VX to the value of the delay timer
-void Emulator::opcodeFX07(WORD opcode);
-
-// A key press is awaited, and then stored in VX (blocking operation, all
-// instruction halted until next key event)
-void Emulator::opcodeFX0A(WORD opcode);
-
-// Sets the delay timer to VX
-void Emulator::opcodeFX15(WORD opcode);
-
-// Sets the sound timer to VX
-void Emulator::opcodeFX18(WORD opcode);
-
-// I += Vx
-void Emulator::opcodeFX1E(WORD opcode);
-
-// Sets I to the location of the sprite for the character in VX. Characters 0-F
-// (in hexadecimal) are represented by a 4x5 font
-void Emulator::opcodeFX29(WORD opcode);
+/*// Skips the next instruction if the key stored in VX is pressed (usually the*/
+/*// next instruction is a jump to skip a code block)*/
+/*void Emulator::opcodeEX9E(WORD opcode);*/
+/**/
+/*// Skips the next instruction if the key stored in VX is not pressed (usually*/
+/*// the next instruction is a jump to skip a code block)*/
+/*void Emulator::opcodeEXA1(WORD opcode);*/
+/**/
+/*// Sets VX to the value of the delay timer*/
+/*void Emulator::opcodeFX07(WORD opcode);*/
+/**/
+/*// A key press is awaited, and then stored in VX (blocking operation, all*/
+/*// instruction halted until next key event)*/
+/*void Emulator::opcodeFX0A(WORD opcode);*/
+/**/
+/*// Sets the delay timer to VX*/
+/*void Emulator::opcodeFX15(WORD opcode);*/
+/**/
+/*// Sets the sound timer to VX*/
+/*void Emulator::opcodeFX18(WORD opcode);*/
+/**/
+/*// I += Vx*/
+/*void Emulator::opcodeFX1E(WORD opcode);*/
+/**/
+/*// Sets I to the location of the sprite for the character in VX. Characters 0-F*/
+/*// (in hexadecimal) are represented by a 4x5 font*/
+/*void Emulator::opcodeFX29(WORD opcode);*/
 
 // Stores the binary-coded decimal representation of VX, with the hundreds digit
 // in memory at location in I, the tens digit at location I+1, and the ones
